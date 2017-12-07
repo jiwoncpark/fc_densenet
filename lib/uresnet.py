@@ -121,6 +121,48 @@ class uresnet(ssnet_base):
             if self._debug: print(net.shape, 'after conv2')
             return net
 
+class vertex_net(ssnet_base):
+
+    def __init__(self, dims,  base_num_outputs=1, num_class=1, debug=False):
+
+        super(vertex_net, self).__init__(dims=dims, num_class=num_class)
+        self._base_num_outputs = int(base_num_outputs)
+        self._debug = bool(debug)
+
+    def _buildvtx(self, input_tensor):
+
+        if self._debug: print(input_tensor.shape, 'input shape')
+        # figure out 2d or 3d                                                                                                                           
+        fn_conv = slim.conv2d
+        if len(input_tensor.shape) == 5:
+            fn_conv = slim.conv3d
+
+        with tf.variable_scope('VertexNet'):
+            conv_feature_map = {}
+            # assume zero padding                                                                                                                       
+            net = fn_conv(inputs = input_tensor,
+                          num_outputs = 16, # make configurable later
+                          kernel_size = 3,
+                          stride = 1,
+                          trainable = self._trainable,
+                          normalizer_fn = None,
+                          activation_fn = tf.nn.relu,
+                          padding = 'same',
+                          scope = 'conv_vtx0')
+            if self._debug: print(net.shape, 'after conv_vtx0')
+
+            net = fn_conv(inputs = net,
+                          num_outputs = self._base_num_outputs,
+                          kernel_size = 3,
+                          stride = 1,
+                          trainable = self._trainable,
+                          normalizer_fn = None,
+                          activation_fn = None,
+                          padding = 'same',
+                          scope = 'conv_vtx1')
+            if self._debug: print(net.shape, 'after conv_vtx1')
+            return net
+
 if __name__ == '__main__':
 
     import sys
@@ -128,6 +170,10 @@ if __name__ == '__main__':
     if '3d' in sys.argv:
         dims = [128,128,128,1]
     predict_vertex = 'vtx' in sys.argv
+    run_vertexnet = 'vtxnet' in sys.argv
+    if predict_vertex and run_vertexnet:
+        raise ValueError('vertexnet cannot be run when predicting vertex along with class')
+    
     # some constants
     BATCH=1
     NUM_CLASS=3
@@ -135,7 +181,15 @@ if __name__ == '__main__':
     net = uresnet(dims=dims,
                   num_class=NUM_CLASS,
                   debug=True)
-    net.construct(trainable=True,use_weight=True,predict_vertex=predict_vertex)
+    net.construct(trainable=True,
+                  use_weight=True,
+                  predict_vertex=predict_vertex)
+    if run_vertexnet:
+        net_vtx = vertex_net(dims=dims,
+                             debug=True)
+        net_vtx.construct_vtx(trainable=True,
+                              use_weight = True,
+                              vertex_layer = run_vertexnet)
 
     import sys
     if 'save' in sys.argv:

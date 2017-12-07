@@ -17,12 +17,13 @@ class ssnet_base(object):
   def _build(self,input_tensor):
     raise NotImplementedError
 
-  def construct(self,trainable=True,use_weight=True, learning_rate=None, predict_vertex=False):
+  def construct(self,trainable=True,use_weight=True, learning_rate=None, predict_vertex=False, vertex_layer=False):
 
     self._trainable  = bool(trainable)
     self._use_weight = bool(use_weight)
     self._learning_rate = learning_rate
     self._predict_vertex = bool(predict_vertex)
+    self._vertex_layer = bool(vertex_layer)
 
     self._final_num_outputs = self._num_class
     if self._predict_vertex:
@@ -134,6 +135,84 @@ class ssnet_base(object):
       tf.summary.scalar('vertex loss', self._vertex_loss)
       tf.summary.scalar('total loss', self._total_loss)
 
+  def construct_vtx(self, trainable=True, use_weight=True, learning_rate=None, predict_vertex=False, vertex_layer=True):
+    
+    self._trainable = bool(trainable)
+    self._use_weight = bool(use_weight)
+    self._learning_rate = learning_rate
+    self._predict_vertex = bool(predict_vertex)
+    self._vertex_layer = bool(vertex_layer)
+    self._final_num_outputs = self._num_class
+
+    entry_size = np.prod(self._dims)
+
+    with tf.variable_scope('input_prep_vtx'):
+      self._input_data = tf.placeholder(tf.float32, [None, entry_size], name='input_data')
+      self._input_vertex_label = tf.placeholder(tf.float32, [None, entry_size], name='input_vertex_label')
+      self._input_vertex_weight = tf.placeholder(tf.float32, [None, entry_size], name='input_vertex_weight')
+
+      shape_dim = np.insert(self._dims, 0, -1)
+
+      input_data = tf.reshape(self._input_data, shape_dim, name='data_reshape')
+      vertex_label = tf.reshape(self._input_vertex_label, shape_dim, name='vertex_label_reshape')
+      vertex_weight = tf.reshape(self._input_vertex_weight, shape_dim[:-1], name='vertex_weight_reshape')
+
+      net = self._buildvtx(input_tensor=input_data)
+
+      head_vertex = net
+
+      self._train = None
+      self._vertex_loss = None
+      self._vertex_accuracy_allpix = None
+      self._vertex_accuracy_nonzero = None
+      
+      with tf.variable_scope('accum_grad_vtx'):
+        self._accum_vars = [tf.Variable(tv.initialized_value(),trainable=False) for tv in tf.trainable_variables()]
+
+      with tf.variable_scope('vertexnet_metric'):
+        self._vertex_prediction = tf.nn.sigmoid(x=head_vertex)
+        vertex_score_threshold    = 0.5
+        candidate_vertex_location = tf.to_int64(self._vertex_prediction  > tf.to_float(vertex_score_threshold))
+        correct_vertex_location   = tf.to_int64(vertex_label > tf.to_float(vertex_score_threshold))
+        self._vertex_accuracy_allpix = tf.reduce_mean(tf.cast(tf.equal(candidate_vertex_location,correct_vertex_location),tf.float32))
+        # next provide non-zero mask
+        union_idx = tf.maximum(candidate_vertex_location, correct_vertex_location)
+        candidate_vertex_location = tf.gather_nd(candidate_vertex_location, tf.where(union_idx>tf.to_int64(0)))
+        correct_vertex_location = tf.gather_nd(correct_vertex_location, tf.where(union_idx>tf.to_int64(0)))
+        # candidate_vertex_location = tf.gather_nd(candidate_vertex_location, nonzero_idx)
+        # correct_vertex_location   = tf.gather_nd(correct_vertex_location,   nonzero_idx)
+        if tf.size(tf.where(union_idx>tf.to_int64(0)))==0:
+          self._vertex_accuracy_nonzero = 1.
+        else:
+          self._vertex_accuracy_nonzero = tf.reduce_mean(tf.cast(tf.equal(candidate_vertex_location,correct_vertex_location),tf.float32))
+      
+      if not self._trainable: return
+
+      with tf.variable_scope('vertexnet_train'):
+        self._vertex_loss = tf.squeeze(tf.nn.sigmoid_cross_entropy_with_logits(labels=vertex_label, logits=head_vertex),axis=len(self._dims))
+        if self._use_weight:
+          self._vertex_loss = tf.multiply(vertex_weight, self._vertex_loss)
+        self._vertex_loss = tf.reshape(self._vertex_loss,[-1, int(entry_size / self._dims[-1])])
+        self._vertex_loss = tf.reduce_mean(tf.reduce_sum(self._vertex_loss,axis=1))
+    
+      # need to separate learning rate for vertex layer + make it configurable
+      if self._learning_rate < 0:
+        opt = tf.train.AdamOptimizer()
+      else:
+        opt = tf.train.AdamOptimizer(self._learning_rate)
+
+      self._zero_gradients = [tv.assign(tf.zeros_like(tv)) for tv in self._accum_vars]
+      for i, gv in enumerate(opt.compute_gradients(self._vertex_loss)): print(i, gv)
+      self._accum_gradients = [self._accum_vars[i].assign_add(gv[0]) for i, gv in enumerate(opt.compute_gradients(self._vertex_loss))]
+      self._apply_gradients = opt.apply_gradients(zip(self._accum_vars, tf.trainable_variables()))
+
+      if len(self._dims) == 3:
+        tf.summary.image('data_example',tf.image.grayscale_to_rgb(data,'gray_to_rgb'),10)
+
+      tf.summary.scalar('vertex accuracy', self._vertex_accuracy_allpix)
+      tf.summary.scalar('vertex accuracy (nonzero)', self._vertex_accuracy_nonzero)
+      tf.summary.scalar('vertex loss', self._vertex_loss)
+
   def zero_gradients(self, sess):
     return sess.run([self._zero_gradients])
 
@@ -147,15 +226,23 @@ class ssnet_base(object):
     doc = []
     ops = []
     # overall
-    ops += [self._accum_gradients, self._total_loss]
-    doc += ['', 'total loss']
-    # classification
-    ops += [self._class_loss, self._class_accuracy_allpix, self._class_accuracy_nonzero]
-    doc += ['class loss', 'class acc. all', 'class acc. nonzero']
-    if self._predict_vertex:
-      # vertex finding
-      ops += [self._vertex_loss, self._vertex_accuracy_allpix, self._vertex_accuracy_nonzero]
+    ops += [self._accum_gradients]
+    doc += ['']
+    if self._vertex_layer:
+      print("no none!!!!!!!!!!!!!!!!!!!!!!!")
+      ops += [self._vertex_loss,  self._vertex_accuracy_allpix, self._vertex_accuracy_nonzero]
       doc += ['vertex loss', 'vertex acc. all', 'vertex acc. nonzero']
+    else:
+      ops += [self._total_loss]
+      doc += ['total loss']
+      # classification                                                                                                                                   
+      ops += [self._class_loss, self._class_accuracy_allpix, self._class_accuracy_nonzero]
+      doc += ['class loss', 'class acc. all', 'class acc. nonzero']
+      if self._predict_vertex:
+      # vertex finding                                                                                                                                   
+        ops += [self._vertex_loss, self._vertex_accuracy_allpix, self._vertex_accuracy_nonzero]
+        doc += ['vertex loss', 'vertex acc. all', 'vertex acc. nonzero']
+
 
     return sess.run(ops, feed_dict = feed_dict ), doc
 
