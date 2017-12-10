@@ -23,6 +23,11 @@ class ssnet_config:
     KEYWORD_DATA      = 'data'
     KEYWORD_LABEL     = 'label'
     KEYWORD_WEIGHT    = 'weight'
+    NUM_POOL          = 4
+    NUM_LAYERS        = [ 4, 4, 4, 4, 4, 4, 4, 4, 4]
+#    NUM_LAYERS        = [4, 5, 7, 10, 12, 15, 12, 10, 7, 5, 4]
+    GROWTH            = 16
+    KEEP_PROB         = 1.
 
     def __init__(self):
         pass
