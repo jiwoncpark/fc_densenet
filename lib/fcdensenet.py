@@ -66,7 +66,7 @@ class fcdensenet(ssnet_base):
                     net = transition_down(input_tensor = net,
                                           is_training = self._trainable,
                                           scope = 'downtransition_'+str(block_i))
-                if self._debug: print(net.shape, 'after down block'+str(block_i)))
+                if self._debug: print(net.shape, 'after down block'+str(block_i))
 
             shortcuts = shortcuts[::-1]
             
@@ -75,45 +75,48 @@ class fcdensenet(ssnet_base):
             #
 
             to_upsample = []
-A1;95;0c
-            for layer_i in xrange(self._num_layers[num_down]):
+            
+
+            for layer_i in xrange(self._num_layers[self._num_down]):
                 temp = batch_activ_conv(net,
                                         num_outputs = self._growth,
                                         kernel_size = 3,
                                         is_training = self._trainable,
                                         keep_prob = self._keep_prob, 
-                                        scope = 'batch_activ_conv_middle')
+                                        scope = 'batch_activ_conv_middle_layer%d' %layer_i)
                 to_upsample.append(temp)
                 net = tf.concat([net, temp],
                                 axis=len(net.shape)-1,
                                 name='middle_concat%d' % layer_i)
             if self._debug: print(net.shape, 'after final downblock')
+
             #
             # UPSAMPLING PATH
             #
 
-            for block_i in xrange(num_down): # note num_down = num_up
-                n_filters_up = self._growth*self._num_layers[num_down + block_i]
+            for block_i in xrange(self._num_down): # note num_down = num_up
+                num_filters_up = self._growth*self._num_layers[self._num_down + block_i]
+                print(num_filters_up)
                 net = transition_up(shortcut = shortcuts[block_i], 
                                     to_concat = to_upsample,
-                                    num_outputs = n_filters_up
+                                    num_outputs = num_filters_up,
                                     is_training = self._trainable,
                                     scope = 'uptransition_%d' %block_i)
-             
+ 
                 # dense block, while we update to_upsample
                 to_upsample = []
-                for layer_i in xrange(self._num_layers[num_down]):
+                for layer_i in xrange(self._num_layers[self._num_down + block_i + 1]):
                     temp = batch_activ_conv(net,
                                             num_outputs = self._growth,
                                             kernel_size = 3,
                                             is_training = self._trainable,
                                             keep_prob = self._keep_prob,
-                                            scope = 'batch_activ_conv_up%d' %block_i)
+                                            scope = 'batch_activ_conv_up%d_layer%d' %(block_i,layer_i))
                     to_upsample.append(temp)
                     net = tf.concat([net, temp],
                                     axis=len(net.shape)-1,
                                     name='up%d_concat_layer%d' % (block_i, layer_i))
-                if self._debug: print(net.shape, 'after up block%d' block_i))
+                if self._debug: print(net.shape, 'after up block%d' %block_i)
 
             return net
 
@@ -121,17 +124,25 @@ A1;95;0c
 if __name__ == '__main__':
 
     import sys
-    dims = [512,512,1]
-    if '3d' in sys.argv:
-        dims = [128,128,128,1]
+    dims = [128,128,128,1]
     # some constants
     BATCH=1
     NUM_CLASS=3
     # make network
-    net = uresnet(dims=dims,
-                  num_class=NUM_CLASS,
-                  debug=True)
-    net.construct(trainable=True,use_weight=True)
+    #    net = uresnet(dims=dims,
+    #                  num_class=NUM_CLASS,
+    #                  debug=True)
+    #    net.construct(trainable=True,use_weight=True)
+
+    net = fcdensenet(dims=dims,
+                     num_class = NUM_CLASS,
+                     debug=True,
+                     num_down = 5,
+                     num_layers = [4, 5, 7, 10, 12, 15, 12, 10, 7, 5, 4],
+                     num_filters_base = 48,
+                     growth = 16,
+                     keep_prob = 0.2)
+    net.construct(trainable=True, use_weight=True)
 
     import sys
     if 'save' in sys.argv:
