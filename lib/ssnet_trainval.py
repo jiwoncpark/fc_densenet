@@ -11,7 +11,8 @@ import numpy as np
 
 # Import more libraries (after configuration is validated)
 import tensorflow as tf
-from uresnet import uresnet
+from fcdensenet import fcdensenet
+#from uresnet import uresnet
 from larcv import larcv
 from larcv.dataloader2 import larcv_threadio
 from config import ssnet_config
@@ -60,11 +61,20 @@ class ssnet_trainval(object):
                       store_event_ids = (not self._cfg.TRAIN))
     dim_data = self._filler.fetch_data(self._cfg.KEYWORD_DATA).dim()
     dims = []
+
+    self._net = fcdensenet(dims=dim_data[1:],
+                           num_class = self._cfg.NUM_CLASS,
+                           num_down = self._cfg.NUM_POOL,
+                           num_layers = [4, 5, 7, 10, 12, 15, 12, 10, 7, 5, 4],
+                           num_filters_base = self._cfg.BASE_NUM_FILTERS,
+                           growth = self._cfg.GROWTH,
+                           keep_prob = self._cfg.KEEP_PROB)
+    '''
     self._net = uresnet(dims=dim_data[1:],
                         num_class=3, 
                         base_num_outputs=self._cfg.BASE_NUM_FILTERS, 
                         debug=False)
-
+    '''
     if self._cfg.TRAIN:
       self._net.construct(trainable=self._cfg.TRAIN,use_weight=self._cfg.USE_WEIGHTS)
     else:

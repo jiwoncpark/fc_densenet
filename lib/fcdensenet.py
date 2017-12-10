@@ -96,7 +96,6 @@ class fcdensenet(ssnet_base):
 
             for block_i in xrange(self._num_down): # note num_down = num_up
                 num_filters_up = self._growth*self._num_layers[self._num_down + block_i]
-                print(num_filters_up)
                 net = transition_up(shortcut = shortcuts[block_i], 
                                     to_concat = to_upsample,
                                     num_outputs = num_filters_up,
@@ -118,6 +117,20 @@ class fcdensenet(ssnet_base):
                                     name='up%d_concat_layer%d' % (block_i, layer_i))
                 if self._debug: print(net.shape, 'after up block%d' %block_i)
 
+            #
+            # CLASSIFICATION NEURON
+            #
+
+            net = fn_conv(inputs      = net,
+                          num_outputs = self._num_class,
+                          padding     = 'same',
+                          kernel_size = 3,
+                          stride      = 1,
+                          trainable   = self._trainable,
+                          normalizer_fn = None,
+                          activation_fn = None,
+                          scope       = 'class_conv')
+            if self._debug: print(net.shape, 'after classification neuron')
             return net
 
 
